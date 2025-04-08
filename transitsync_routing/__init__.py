@@ -20,5 +20,5 @@ Example:
 """
 
 from .route_planner import RoutePlanner
-from .calendar_event import CalendarEvent
+from .event import Event
 from .stop import Stop

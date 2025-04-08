@@ -3,7 +3,7 @@ import logging
 import math
 import datetime
 import config
-from calendar_event import CalendarEvent
+from event import Event
 from stop import Stop
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -203,7 +203,7 @@ class RoutePlanner:
             logging.error("Exception fetching stop predictions: %s", e)
             return None
 
-    def plan_route_between_events(self, event1: CalendarEvent, event2: CalendarEvent):
+    def plan_route_between_events(self, event1: Event, event2: Event):
         """
         Plans a transit route from event1 to event2.
         Returns a dictionary with route details including:
@@ -476,7 +476,7 @@ class RoutePlanner:
         if (first_event.location.strip().lower() != config.HOME_ADDRESS.strip().lower() and
             not any(loc.lower() in first_event.location.lower() for loc in ["home", "house", "apartment", "flat"])):
             # Create a dummy home event
-            home_event = CalendarEvent({
+            home_event = Event({
                 "summary": "Home",
                 "location": config.HOME_ADDRESS,
                 "start": {
@@ -562,7 +562,7 @@ class RoutePlanner:
                     )
                 }
             # Create a CalendarEvent object from the dictionary
-            calendar_event = CalendarEvent(event_dict)
+            calendar_event = Event(event_dict)
             calendar_events.append(calendar_event)
 
         logging.info(f"Created {len(calendar_events)} calendar events from route planning")

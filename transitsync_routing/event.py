@@ -1,6 +1,6 @@
 from datetime import datetime
 
-class CalendarEvent:
+class Event:
     def __init__(self, summary, location, start_time=None, end_time=None, description=""):
         self.summary = summary
         self.location = location
