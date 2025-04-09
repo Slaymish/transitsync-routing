@@ -264,18 +264,29 @@ class RoutePlanner:
         logging.info("Planned routes for events: %s", routes)
         return routes
 
-    def process_events(self, home_address):
+    def process_events(self, home_address=None):
         """
         Processes the events to plan routes and returns a list of CalendarEvent objects
         representing transit events that can be added to the calendar.
+        
+        Args:
+            home_address: The user's home address to use as origin/destination
         """
         if not self.events:
             logging.info("No events to process.")
             return []
+        
+        # Set HOME_ADDRESS for any events without a location
         for event in self.events:
             if not event.location or event.location.strip() == "":
-                event.location = home_address
+                if home_address:
+                    event.location = home_address
+                    logging.info(f"Using user's home address for event without location: {event.summary}")
+                else:
+                    event.location = config.HOME_ADDRESS
+                    logging.info(f"Using default home address for event without location: {event.summary}")
 
+        # Filter out events created by the bot to avoid processing them again
         filtered_events = [event for event in self.events if not (
             event.summary.startswith("Transit:") or event.summary.startswith("Walking:") or 
             event.summary.startswith("[TransitBot]")
@@ -285,36 +296,49 @@ class RoutePlanner:
             logging.info("No valid events found after filtering out bot-created events.")
             return []
 
+        # Sort events by start time
         sorted_events = sorted(filtered_events, key=lambda e: e.start_time or datetime.datetime.min)
+        
+        # Get unique events (different locations)
         unique_events = [sorted_events[0]]
         for event in sorted_events[1:]:
             if event.location.strip().lower() != unique_events[-1].location.strip().lower():
                 unique_events.append(event)
                 
         routes = []
+        
+        # Use the user's home address if available
+        user_home_address = home_address if home_address else config.HOME_ADDRESS
+        
+        # Check if the first event's location is not HOME_ADDRESS
         first_event = unique_events[0]
-        if (first_event.location.strip().lower() != home_address.strip().lower() and
+        if (first_event.location.strip().lower() != user_home_address.strip().lower() and
             not any(loc.lower() in first_event.location.lower() for loc in ["home", "house", "apartment", "flat"])):
+            # Create a dummy home event
             home_event = Event({
                 "summary": "Home",
-                "location": home_address,
+                "location": user_home_address,
                 "start": {
                     "dateTime": (first_event.start_time - datetime.timedelta(hours=1)).isoformat() 
                     if first_event.start_time else datetime.datetime.now().isoformat(),
-                    "timeZone": Config.TIMEZONE
+                    "timeZone": "Pacific/Auckland"
                 }
             })
+            # Plan route from home to first event
             home_route = self.plan_route_between_events(home_event, first_event)
             if home_route:
                 routes.append(home_route)
                 logging.info(f"Added route from home to first event: {home_route}")
         
+        # Plan routes between all remaining events
         for i in range(len(unique_events) - 1):
             route = self.plan_route_between_events(unique_events[i], unique_events[i+1])
             if route:
                 routes.append(route)
         
         logging.info(f"Planned {len(routes)} routes for events")
+
+        # Convert route information into CalendarEvent objects
         calendar_events = []
         for route in routes:
             if not route:
