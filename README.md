@@ -19,5 +19,5 @@ This repo is **open source** and focuses only on the route-planning logic. Calen
 ## 🚀 Installation
 
 ```bash
-pip install git+https://github.com/yourusername/transitsync-routing.git
+pip install git+https://github.com/Slaymish/transitsync-routing.git
 ```
