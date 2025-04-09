@@ -3,8 +3,8 @@ import logging
 import math
 import datetime
 import config
-from event import Event
-from stop import Stop
+from .event import Event
+from .stop import Stop
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
