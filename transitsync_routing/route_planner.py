@@ -1,173 +1,16 @@
-import requests
 import logging
-import math
 import datetime
-import re
 from .event import Event
-from .stop import Stop
+from .api_client import APIClient
 from .config import Config
-
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculate the great-circle distance between two points on Earth.
-    """
-    R = 6371  # Earth radius in kilometers
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
 
 class RoutePlanner:
     def __init__(self, events):
         """
-        Initialize the RoutePlanner with a list of CalendarEvent objects
-        and a cache to store geocoding results.
+        Initialize the RoutePlanner with a list of CalendarEvent objects.
         """
         self.events = events
-        self.geocode_cache = {}  # key: normalized address, value: (lat, lon)
-
-    def _normalize_address(self, address: str) -> str:
-        """
-        Normalizes the address. Handles special Wellington locations and VUW building codes.
-        Returns the normalized address string.
-        """
-        if not address:
-            logging.error("Empty address provided for normalization")
-            return ""
-        
-        normalized = address.strip()
-        
-        # Special mappings for abbreviated Wellington locations
-        wellington_locations = {
-            "CO246": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO238": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO219": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO118": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MYLT101": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MYLT102": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MYLT103": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MY": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "KK": "Kirk Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "HM": "Hugh Mackenzie Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "EA": "Easterfield Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "von zedlitz": "von Zedlitz Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "VZ": "von Zedlitz Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "zoo": "Wellington Zoo, 200 Daniell Street, Newtown, Wellington 6021, New Zealand",
-            "Wellington Zoo": "Wellington Zoo, 200 Daniell Street, Newtown, Wellington 6021, New Zealand",
-            "VUW": "Victoria University of Wellington, Kelburn Parade, Wellington, New Zealand",
-            "Kelburn Campus": "Victoria University of Wellington, Kelburn Parade, Wellington, New Zealand"
-        }
-        
-        # Handle VUW building codes like "CO246"
-        vuw_code_pattern = re.compile(r'^([A-Za-z]{2,4})(\d{1,3})$')
-        match = vuw_code_pattern.match(normalized)
-        if match:
-            building_code = match.group(1).upper()
-            buildings = {
-                "CO": "Cotton Building",
-                "MY": "Murphy Building",
-                "MYLT": "Murphy Lecture Theatre",
-                "KK": "Kirk Building",
-                "HM": "Hugh Mackenzie Building",
-                "EA": "Easterfield Building",
-                "VZ": "von Zedlitz Building",
-                "MC": "Maclaurin Building",
-                "AM": "Alan MacDiarmid Building"
-            }
-            if building_code in buildings:
-                normalized = f"{buildings[building_code]}, Kelburn Campus, Victoria University, Wellington, New Zealand"
-                logging.info(f"Recognized VUW room code '{address}' -> '{normalized}'")
-        elif normalized in wellington_locations:
-            normalized = wellington_locations[normalized]
-            logging.info(f"Normalized '{address}' to '{normalized}'")
-        else:
-            for key, full_address in wellington_locations.items():
-                if key.lower() in normalized.lower():
-                    normalized = full_address
-                    logging.info(f"Normalized '{address}' to '{normalized}'")
-                    break
-
-        # Append Wellington/New Zealand context if missing details.
-        if "wellington" not in normalized.lower() and "new zealand" not in normalized.lower():
-            if not any(loc in normalized.lower() for loc in ["street", "road", "avenue", "drive"]):
-                original = normalized
-                normalized = f"{normalized}, Wellington, New Zealand"
-                logging.info(f"Added Wellington context: '{original}' -> '{normalized}'")
-        
-        return normalized
-
-    def geocode_address(self, address: str):
-        """
-        Geocodes an address using Nominatim.
-        Uses a cache to avoid repeat API calls.
-        """
-        if not address:
-            logging.error("Empty address provided for geocoding")
-            return None
-        
-        normalized = self._normalize_address(address)
-        
-        # Check cache first
-        if normalized in self.geocode_cache:
-            logging.info("Cache hit for address '%s'", normalized)
-            return self.geocode_cache[normalized]
-        
-        url = Config.OSM_URL or "https://nominatim.openstreetmap.org/search"
-        params = {"q": normalized, "format": "json", "limit": 1}
-        headers = {"User-Agent": "TransitSync/1.0 (hamishapps@gmail.com)"}
-        
-        try:
-            import time
-            # Respect API limits
-            time.sleep(1)
-            response = requests.get(url, params=params, headers=headers)
-            if response.status_code != 200:
-                logging.error("Nominatim geocoding failed: %s", response.text)
-                return None
-            data = response.json()
-            if not data:
-                logging.error("No geocoding result for address: %s", normalized)
-                # Fallbacks for popular locations
-                if "wellington zoo" in normalized.lower():
-                    coords = (-41.3186, 174.7824)
-                elif any(keyword in normalized.lower() for keyword in ["victoria university", "vuw", "kelburn campus"]):
-                    coords = (-41.2901, 174.7682)
-                elif "cotton building" in normalized.lower():
-                    coords = (-41.2900, 174.7686)
-                elif "murphy" in normalized.lower():
-                    coords = (-41.2896, 174.7677)
-                else:
-                    return None
-                self.geocode_cache[normalized] = coords
-                return coords
-            lat = float(data[0]['lat'])
-            lon = float(data[0]['lon'])
-            coords = (lat, lon)
-            logging.info("Geocoded address '%s' to lat: %s, lon: %s", normalized, lat, lon)
-            # Cache the result
-            self.geocode_cache[normalized] = coords
-            return coords
-        except Exception as e:
-            logging.error("Exception during geocoding: %s", e)
-            return None
-
-    def query_otp_graphql(self, query: str, variables: dict):
-        """
-        Sends a GraphQL query to the OTP API.
-        """
-        endpoint = Config.OTP_URL or "http://localhost:8080/otp/index/graphql"
-        headers = {"Content-Type": "application/json"}
-        try:
-            response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logging.error("GraphQL query failed: %s", e)
-            return None
+        self.api_client = APIClient()
 
     def plan_route_between_events(self, event1: Event, event2: Event):
         """
@@ -190,8 +33,8 @@ class RoutePlanner:
             arrival_dt = datetime.datetime.now()
 
         # Geocode both event locations
-        geo1 = self.geocode_address(event1.location)
-        geo2 = self.geocode_address(event2.location)
+        geo1 = self.api_client.geocode_address(event1.location)
+        geo2 = self.api_client.geocode_address(event2.location)
         if geo1 is None:
             logging.error(f"Failed to geocode for event: {event1.summary} at {event1.location}")
             return None
@@ -229,7 +72,7 @@ class RoutePlanner:
             "arriveBy": True
         }
 
-        result = self.query_otp_graphql(query, variables)
+        result = self.api_client.query_otp_graphql(query, variables)
         if result is None or "data" not in result or "plan" not in result["data"]:
             logging.error("GraphQL route planning failed or returned no data.")
             return None
@@ -293,15 +136,16 @@ class RoutePlanner:
             logging.info("No events to process.")
             return []
         
+        # Set default home address if none provided
+        if not home_address:
+            home_address = "1 Willis Street, Wellington, New Zealand"
+            logging.info(f"No home address provided, using default: {home_address}")
+        
         # Set a fallback home address if an event lacks one.
         for event in self.events:
             if not event.location or not event.location.strip():
-                if home_address:
-                    event.location = home_address
-                    logging.info(f"Using user's home address for event without location: {event.summary}")
-                else:
-                    event.location = "1 Willis Street, Wellington, New Zealand"
-                    logging.warning(f"Using default home address for event: {event.summary}")
+                event.location = home_address
+                logging.info(f"Using home address for event without location: {event.summary}")
 
         # Filter out events created by the bot
         filtered_events = [event for event in self.events if not (
@@ -319,8 +163,6 @@ class RoutePlanner:
                 unique_events.append(event)
                 
         routes = []
-        if not home_address:
-            return []
         
         # If first event isn't the home address, create a dummy home event.
         first_event = unique_events[0]

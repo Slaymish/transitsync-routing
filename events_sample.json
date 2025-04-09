@@ -1,0 +1,38 @@
+[
+    {
+        "summary": "Meeting at University",
+        "location": "Kelburn Campus, Victoria University, Wellington, New Zealand",
+        "start": {
+            "dateTime": "2025-04-10T09:00:00",
+            "timeZone": "Pacific/Auckland"
+        },
+        "end": {
+            "dateTime": "2025-04-10T10:30:00",
+            "timeZone": "Pacific/Auckland"
+        }
+    },
+    {
+        "summary": "Lunch at Cafe",
+        "location": "Cuba Street, Wellington, New Zealand",
+        "start": {
+            "dateTime": "2025-04-10T12:00:00",
+            "timeZone": "Pacific/Auckland"
+        },
+        "end": {
+            "dateTime": "2025-04-10T13:00:00",
+            "timeZone": "Pacific/Auckland"
+        }
+    },
+    {
+        "summary": "Afternoon Zoo Visit",
+        "location": "Wellington Zoo, Wellington, New Zealand",
+        "start": {
+            "dateTime": "2025-04-10T14:30:00",
+            "timeZone": "Pacific/Auckland"
+        },
+        "end": {
+            "dateTime": "2025-04-10T16:30:00",
+            "timeZone": "Pacific/Auckland"
+        }
+    }
+]
