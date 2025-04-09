@@ -38,6 +38,19 @@ class RoutePlanner:
         # Special handling for Wellington locations that might be abbreviated
         wellington_locations = {
             "CO246": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "CO238": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "CO219": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "CO118": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "MYLT101": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "MYLT102": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "MYLT103": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "MY": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "KK": "Kirk Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "HM": "Hugh Mackenzie Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "EA": "Easterfield Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "von zedlitz": "von Zedlitz Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "VZ": "von Zedlitz Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
+            "CO": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
             "zoo": "Wellington Zoo, 200 Daniell Street, Newtown, Wellington 6021, New Zealand",
             "Wellington Zoo": "Wellington Zoo, 200 Daniell Street, Newtown, Wellington 6021, New Zealand",
             "VUW": "Victoria University of Wellington, Kelburn Parade, Wellington, New Zealand",
@@ -46,11 +59,39 @@ class RoutePlanner:
         
         # Check if the address matches any known locations
         normalized_address = address.strip()
-        for key, full_address in wellington_locations.items():
-            if key.lower() in normalized_address.lower():
+        
+        # Handle VUW building codes (CO, MY, KK, etc followed by numbers)
+        import re
+        vuw_code_pattern = re.compile(r'^([A-Za-z]{2,4})(\d{1,3})$')
+        match = vuw_code_pattern.match(normalized_address)
+        if match:
+            building_code = match.group(1).upper()
+            room_number = match.group(2)
+            buildings = {
+                "CO": "Cotton Building",
+                "MY": "Murphy Building",
+                "MYLT": "Murphy Lecture Theatre",
+                "KK": "Kirk Building",
+                "HM": "Hugh Mackenzie Building",
+                "EA": "Easterfield Building",
+                "VZ": "von Zedlitz Building",
+                "MC": "Maclaurin Building",
+                "AM": "Alan MacDiarmid Building"
+            }
+            if building_code in buildings:
+                full_address = f"{buildings[building_code]}, Kelburn Campus, Victoria University, Wellington, New Zealand"
+                logging.info(f"Recognized VUW room code {normalized_address} -> {full_address}")
                 address = full_address
-                logging.info(f"Normalized address '{normalized_address}' to '{address}'")
-                break
+        elif normalized_address in wellington_locations:
+            address = wellington_locations[normalized_address]
+            logging.info(f"Normalized address '{normalized_address}' to '{address}'")
+        else:
+            # Also try partial matches for building codes
+            for key, full_address in wellington_locations.items():
+                if key.lower() in normalized_address.lower():
+                    address = full_address
+                    logging.info(f"Normalized address '{normalized_address}' to '{address}'")
+                    break
                 
         # For addresses without location details, add Wellington, NZ to improve geocoding success
         if "wellington" not in address.lower() and "new zealand" not in address.lower():
@@ -83,6 +124,12 @@ class RoutePlanner:
                 elif "victoria university" in address.lower() or "vuw" in address.lower() or "kelburn campus" in address.lower():
                     logging.info("Using fallback coordinates for Victoria University")
                     return (-41.2901, 174.7682)  # VUW Kelburn Campus coordinates
+                elif "cotton building" in address.lower() or "co" in address.lower():
+                    logging.info("Using fallback coordinates for Cotton Building")
+                    return (-41.2900, 174.7686)  # Cotton Building coordinates
+                elif "murphy" in address.lower() or "my" in address.lower():
+                    logging.info("Using fallback coordinates for Murphy Building")
+                    return (-41.2896, 174.7677)  # Murphy Building coordinates
                 return None
                 
             lat = float(data[0]['lat'])
