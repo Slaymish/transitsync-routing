@@ -283,8 +283,8 @@ class RoutePlanner:
                     event.location = home_address
                     logging.info(f"Using user's home address for event without location: {event.summary}")
                 else:
-                    event.location = config.HOME_ADDRESS
-                    logging.info(f"Using default home address for event without location: {event.summary}")
+                    event.location = "1 Willis Street, Wellington, New Zealand"
+                    logging.warn(f"Using default home address for event without location: {event.summary}")
 
         # Filter out events created by the bot to avoid processing them again
         filtered_events = [event for event in self.events if not (
@@ -308,7 +308,9 @@ class RoutePlanner:
         routes = []
         
         # Use the user's home address if available
-        user_home_address = home_address if home_address else config.HOME_ADDRESS
+        user_home_address = home_address
+        if not user_home_address:
+            return []
         
         # Check if the first event's location is not HOME_ADDRESS
         first_event = unique_events[0]
