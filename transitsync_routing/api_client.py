@@ -46,6 +46,16 @@ class APIClient:
             
         if self.offline_mode:
             logging.info("APIClient initialized in OFFLINE MODE - using mock data")
+        
+        # New: List of possible GraphQL endpoint paths to try (in order of preference)
+        self.graphql_endpoints = [
+            "/otp/index/graphql",          # Original path used in code
+            "/otp/routers/default/index/graphql",  # Common path for OTP 2.x
+            "/graphql",                    # Newer versions simplified path
+            "/otp/graphql"                 # Alternative path
+        ]
+        # We'll find the working endpoint on first GraphQL call
+        self.working_graphql_endpoint = None
             
         # Predefined geocoding results for offline mode
         self.offline_geocode_data = {
@@ -66,7 +76,12 @@ class APIClient:
             "wellington railway station": (-41.2790, 174.7851),
             "wellington station": (-41.2790, 174.7851),
             "123 the terrace, wellington": (-41.2820, 174.7730),
-            "the terrace, wellington": (-41.2820, 174.7730)
+            "the terrace, wellington": (-41.2820, 174.7730),
+            # Adding Te Papa Museum and Wellington Botanic Garden
+            "te papa museum": (-41.2903, 174.7819),
+            "te papa museum, wellington, new zealand": (-41.2903, 174.7819),
+            "wellington botanic garden": (-41.2825, 174.7669),
+            "wellington botanic garden, wellington, new zealand": (-41.2825, 174.7669)
         }
         
         # Common Wellington bus stops as fallbacks
@@ -429,189 +444,118 @@ class APIClient:
         """
         Sends a GraphQL query to the OTP API.
         In offline mode, returns mock itineraries.
+        Will try multiple endpoints to find the working one for the OTP server.
         """
         if self.offline_mode:
-            # Generate a mock route response
-            from_lat = variables.get('from', {}).get('lat', 0) 
-            from_lon = variables.get('from', {}).get('lon', 0)
-            to_lat = variables.get('to', {}).get('lat', 0)
-            to_lon = variables.get('to', {}).get('lon', 0)
+            # In offline mode, create a mock response
+            logging.info("[OFFLINE] Creating mock GraphQL response")
             
-            # Calculate approximate travel time based on distance
-            distance_km = haversine_distance(from_lat, from_lon, to_lat, to_lon)
+            # Extract from and to coordinates from the variables
+            from_lat = variables.get("from", {}).get("lat")
+            from_lon = variables.get("from", {}).get("lon")
+            to_lat = variables.get("to", {}).get("lat")
+            to_lon = variables.get("to", {}).get("lon")
             
-            # Mock various parameters
-            travel_time_minutes = max(10, int(distance_km * 6))  # ~10km/h for public transit including stops
-            walking_speed = 5  # km/h
-            transit_speed = 20  # km/h
+            # Calculate a rough travel time based on distance
+            travel_time_minutes = 10  # Default for short distances
             
-            # Determine if it's walkable or needs transit
-            is_walkable = distance_km < 2  # Less than 2km is walkable
-            
-            # Calculate timestamps
-            arrive_by = variables.get('arriveBy', False)
-            time_str = variables.get('time', '12:00pm')
-            date_str = variables.get('date', datetime.date.today().strftime('%Y-%m-%d'))
-            
-            try:
-                # Parse the time
-                if ':' in time_str:
-                    if 'am' in time_str.lower() or 'pm' in time_str.lower():
-                        time_obj = datetime.datetime.strptime(time_str, '%I:%M%p')
-                    else:
-                        time_obj = datetime.datetime.strptime(time_str, '%H:%M')
+            if from_lat and from_lon and to_lat and to_lon:
+                # Calculate distance using haversine formula
+                distance_km = haversine_distance(from_lat, from_lon, to_lat, to_lon)
+                
+                # Rough travel time calculation:
+                # - Walking: ~5km/h = ~12 min/km
+                # - Bus: ~20km/h = ~3 min/km
+                if distance_km < 1.5:
+                    # Short distance - just walking
+                    travel_time_minutes = distance_km * 12
+                    legs = [self._create_mock_leg("WALK", variables.get("time"), travel_time_minutes)]
                 else:
-                    time_obj = datetime.datetime.strptime('12:00', '%H:%M')
-                
-                # Parse the date
-                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-                
-                # Combine date and time
-                target_time = datetime.datetime.combine(date_obj.date(), time_obj.time())
-                
-                # Convert to timestamp (milliseconds)
-                target_timestamp = int(target_time.timestamp() * 1000)
-                
-                if arrive_by:
-                    end_time = target_timestamp
-                    start_time = end_time - (travel_time_minutes * 60 * 1000)
-                else:
-                    start_time = target_timestamp
-                    end_time = start_time + (travel_time_minutes * 60 * 1000)
-                
-                # Create mock response based on the distance
-                if is_walkable:
-                    # Just a single walking leg
-                    mock_response = {
-                        "data": {
-                            "plan": {
-                                "itineraries": [
-                                    {
-                                        "duration": travel_time_minutes * 60,  # seconds
-                                        "legs": [
-                                            {
-                                                "mode": "WALK",
-                                                "startTime": start_time,
-                                                "endTime": end_time,
-                                                "from": {
-                                                    "name": "Origin"
-                                                },
-                                                "to": {
-                                                    "name": "Destination"
-                                                }
-                                            }
-                                        ]
-                                    }
-                                ]
+                    # Longer trip - walk + bus + walk
+                    # About 20% of time walking to/from stops, 80% on transit
+                    walk_time_1 = min(5, distance_km * 2)
+                    bus_time = distance_km * 3
+                    walk_time_2 = min(5, distance_km * 2)
+                    travel_time_minutes = walk_time_1 + bus_time + walk_time_2
+                    
+                    # Find stops near the origin and destination
+                    origin_stop = self._get_hardcoded_stop_near(from_lat, from_lon)
+                    dest_stop = self._get_hardcoded_stop_near(to_lat, to_lon)
+                    
+                    legs = [
+                        self._create_mock_leg("WALK", variables.get("time"), walk_time_1, 
+                                             "Origin", origin_stop.name),
+                        self._create_mock_leg("BUS", variables.get("time"), bus_time + walk_time_1,
+                                             origin_stop.name, dest_stop.name),
+                        self._create_mock_leg("WALK", variables.get("time"), 
+                                             travel_time_minutes, dest_stop.name, "Destination")
+                    ]
+            else:
+                # If we can't calculate distance, use default legs
+                legs = [self._create_mock_leg("WALK", variables.get("time"), travel_time_minutes)]
+            
+            logging.info(f"[OFFLINE] Generated mock route with {travel_time_minutes} minutes travel time")
+            
+            # Create a mock GraphQL response
+            mock_response = {
+                "data": {
+                    "plan": {
+                        "itineraries": [
+                            {
+                                "duration": travel_time_minutes * 60,  # Convert to seconds
+                                "legs": legs
                             }
-                        }
-                    }
-                else:
-                    # Create a transit journey with walking to/from stops
-                    walking_time = 5 * 60 * 1000  # 5 minutes in milliseconds
-                    transit_time = (travel_time_minutes * 60 * 1000) - (walking_time * 2)
-                    
-                    walk1_start = start_time
-                    walk1_end = walk1_start + walking_time
-                    
-                    transit_start = walk1_end
-                    transit_end = transit_start + transit_time
-                    
-                    walk2_start = transit_end
-                    walk2_end = walk2_start + walking_time
-                    
-                    # Find nearest stops
-                    from_stop = self._get_hardcoded_stop_near(from_lat, from_lon)
-                    to_stop = self._get_hardcoded_stop_near(to_lat, to_lon)
-                    
-                    mock_response = {
-                        "data": {
-                            "plan": {
-                                "itineraries": [
-                                    {
-                                        "duration": travel_time_minutes * 60,  # seconds
-                                        "legs": [
-                                            {
-                                                "mode": "WALK",
-                                                "startTime": walk1_start,
-                                                "endTime": walk1_end,
-                                                "from": {
-                                                    "name": "Origin"
-                                                },
-                                                "to": {
-                                                    "name": from_stop.name
-                                                }
-                                            },
-                                            {
-                                                "mode": "BUS",
-                                                "startTime": transit_start,
-                                                "endTime": transit_end,
-                                                "from": {
-                                                    "name": from_stop.name
-                                                },
-                                                "to": {
-                                                    "name": to_stop.name
-                                                }
-                                            },
-                                            {
-                                                "mode": "WALK",
-                                                "startTime": walk2_start,
-                                                "endTime": walk2_end,
-                                                "from": {
-                                                    "name": to_stop.name
-                                                },
-                                                "to": {
-                                                    "name": "Destination"
-                                                }
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                
-                logging.info(f"[OFFLINE] Generated mock route with {travel_time_minutes} minutes travel time")
-                return mock_response
-                
-            except Exception as e:
-                logging.error(f"Error creating mock response: {e}")
-                # Return a simple fallback response
-                return {
-                    "data": {
-                        "plan": {
-                            "itineraries": [
-                                {
-                                    "duration": 1200,  # 20 minutes
-                                    "legs": [
-                                        {
-                                            "mode": "WALK",
-                                            "startTime": int(time.time() * 1000),
-                                            "endTime": int(time.time() * 1000) + 1200000,
-                                            "from": {"name": "Origin"},
-                                            "to": {"name": "Destination"}
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
+                        ]
                     }
                 }
+            }
+            
+            return mock_response
         
         # Online mode - actual API call
-        endpoint = Config.OTP_URL or "http://localhost:8080/otp/index/graphql"
+        base_url = Config.OTP_URL or "http://localhost:8080"
         headers = {"Content-Type": "application/json"}
-        try:
-            response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            logging.error("GraphQL query failed: %s", e)
-            
-            # Fall back to offline mode if online fails
-            logging.info("Falling back to offline mode for route planning")
-            self.offline_mode = True
-            return self.query_otp_graphql(query, variables)
+        
+        # If we already found a working endpoint, try it first
+        if self.working_graphql_endpoint:
+            try:
+                endpoint = f"{base_url}{self.working_graphql_endpoint}"
+                response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers)
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    # If it's not working anymore, reset and try all endpoints
+                    logging.warning(f"Previously working GraphQL endpoint {endpoint} returned {response.status_code}")
+                    self.working_graphql_endpoint = None
+            except Exception as e:
+                logging.warning(f"Error with previously working endpoint: {e}")
+                self.working_graphql_endpoint = None
+        
+        # Try each endpoint path until we find a working one
+        last_error = None
+        for path in self.graphql_endpoints:
+            endpoint = f"{base_url}{path}"
+            try:
+                logging.debug(f"Trying GraphQL endpoint: {endpoint}")
+                response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers)
+                if response.status_code == 200:
+                    logging.info(f"Found working GraphQL endpoint: {path}")
+                    self.working_graphql_endpoint = path
+                    return response.json()
+                else:
+                    logging.debug(f"Endpoint {path} returned {response.status_code}: {response.text}")
+                    last_error = f"HTTP {response.status_code}: {response.text}"
+            except Exception as e:
+                logging.debug(f"Failed to connect to GraphQL endpoint {endpoint}: {e}")
+                last_error = str(e)
+        
+        # If we get here, no endpoint worked
+        logging.error(f"All GraphQL endpoints failed. Last error: {last_error}")
+                
+        # Fall back to offline mode if online fails
+        logging.info("Falling back to offline mode for route planning")
+        self.offline_mode = True
+        return self.query_otp_graphql(query, variables)
     
     def get_stop_predictions(self, stop_id: str):
         """
@@ -669,3 +613,66 @@ class APIClient:
             logging.info("Falling back to offline predictions")
             self.offline_mode = True
             return self.get_stop_predictions(stop_id)
+    
+    def _create_mock_leg(self, mode, arrival_time_str, minutes_before_arrival, from_name="Origin", to_name="Destination"):
+        """
+        Creates a mock leg for offline mode route planning.
+        
+        Args:
+            mode: Transport mode (WALK, BUS, etc.)
+            arrival_time_str: Target arrival time as string
+            minutes_before_arrival: How many minutes before arrival this leg starts
+            from_name: Name of origin
+            to_name: Name of destination
+        """
+        now = datetime.datetime.now()
+        
+        # Use the target arrival time if provided, otherwise use current time + 30 min
+        target_arrival_time = now + datetime.timedelta(minutes=30)
+        
+        if arrival_time_str:
+            try:
+                # Handle ISO format
+                if 'T' in arrival_time_str:
+                    try:
+                        target_arrival_time = datetime.datetime.fromisoformat(arrival_time_str)
+                    except ValueError:
+                        pass
+                        
+                # Try common time formats (H:M, H:M:S)
+                if target_arrival_time == now + datetime.timedelta(minutes=30):
+                    time_formats = ["%H:%M", "%I:%M%p", "%I:%M %p", "%H:%M:%S"]
+                    for fmt in time_formats:
+                        try:
+                            parsed_time = datetime.datetime.strptime(arrival_time_str, fmt)
+                            # If just time (no date), use today's date
+                            if parsed_time.year == 1900:
+                                target_arrival_time = datetime.datetime.combine(
+                                    now.date(), 
+                                    parsed_time.time()
+                                )
+                                # If the time has already passed today, assume it's for tomorrow
+                                if target_arrival_time < now:
+                                    target_arrival_time += datetime.timedelta(days=1)
+                                break
+                        except ValueError:
+                            continue
+            except Exception as e:
+                logging.error(f"Error parsing arrival time '{arrival_time_str}': {e}")
+                # Fallback to current time + 30 minutes
+        
+        # Calculate leg start and end times
+        leg_end_time = target_arrival_time - datetime.timedelta(minutes=30-minutes_before_arrival)
+        leg_start_time = leg_end_time - datetime.timedelta(minutes=5)  # Default 5 minute segment
+        
+        # Convert to milliseconds since epoch for OTP format
+        start_time_ms = int(leg_start_time.timestamp() * 1000)
+        end_time_ms = int(leg_end_time.timestamp() * 1000)
+        
+        return {
+            "mode": mode,
+            "startTime": start_time_ms,
+            "endTime": end_time_ms,
+            "from": {"name": from_name},
+            "to": {"name": to_name}
+        }
