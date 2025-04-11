@@ -515,20 +515,47 @@ class APIClient:
         # Online mode - actual API call
         base_url = Config.OTP_URL or "http://localhost:8080"
         headers = {"Content-Type": "application/json"}
+
+        # Log the GraphQL query to help with debugging
+        logging.info(f"Sending GraphQL query to OTP: variables={variables}")
+        logging.debug(f"GraphQL query: {query}")
         
         # If we already found a working endpoint, try it first
         if self.working_graphql_endpoint:
             try:
                 endpoint = f"{base_url}{self.working_graphql_endpoint}"
-                response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers)
+                logging.info(f"Using previously working GraphQL endpoint: {endpoint}")
+                response = requests.post(
+                    endpoint, 
+                    json={"query": query, "variables": variables}, 
+                    headers=headers,
+                    timeout=30  # Add timeout to prevent hanging requests
+                )
+                
+                # Log the response status and details
+                logging.debug(f"GraphQL response status: {response.status_code}")
+                
                 if response.status_code == 200:
-                    return response.json()
+                    result = response.json()
+                    # Check for GraphQL errors in the response
+                    if 'errors' in result:
+                        logging.error(f"GraphQL errors in response: {result['errors']}")
+                        # Continue to try other endpoints if there are GraphQL errors
+                        self.working_graphql_endpoint = None
+                    else:
+                        return result
                 else:
                     # If it's not working anymore, reset and try all endpoints
-                    logging.warning(f"Previously working GraphQL endpoint {endpoint} returned {response.status_code}")
+                    logging.warning(f"Previously working GraphQL endpoint {endpoint} returned {response.status_code}: {response.text}")
                     self.working_graphql_endpoint = None
+            except requests.exceptions.Timeout:
+                logging.warning(f"Timeout connecting to GraphQL endpoint {base_url}{self.working_graphql_endpoint}")
+                self.working_graphql_endpoint = None
+            except requests.exceptions.ConnectionError:
+                logging.warning(f"Connection error with GraphQL endpoint {base_url}{self.working_graphql_endpoint}")
+                self.working_graphql_endpoint = None
             except Exception as e:
-                logging.warning(f"Error with previously working endpoint: {e}")
+                logging.warning(f"Error with previously working endpoint: {str(e)}")
                 self.working_graphql_endpoint = None
         
         # Try each endpoint path until we find a working one
@@ -536,21 +563,55 @@ class APIClient:
         for path in self.graphql_endpoints:
             endpoint = f"{base_url}{path}"
             try:
-                logging.debug(f"Trying GraphQL endpoint: {endpoint}")
-                response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers)
+                logging.info(f"Trying GraphQL endpoint: {endpoint}")
+                response = requests.post(
+                    endpoint, 
+                    json={"query": query, "variables": variables}, 
+                    headers=headers,
+                    timeout=30  # Add timeout to prevent hanging requests
+                )
+                
+                logging.debug(f"Endpoint {path} returned status {response.status_code}")
+                
                 if response.status_code == 200:
-                    logging.info(f"Found working GraphQL endpoint: {path}")
-                    self.working_graphql_endpoint = path
-                    return response.json()
+                    result = response.json()
+                    # Check for GraphQL errors in the response
+                    if 'errors' in result:
+                        error_messages = [error.get('message', 'Unknown GraphQL error') for error in result.get('errors', [])]
+                        logging.error(f"GraphQL errors in response from {path}: {error_messages}")
+                        # Continue to next endpoint
+                        last_error = f"GraphQL errors: {error_messages}"
+                    else:
+                        logging.info(f"Found working GraphQL endpoint: {path}")
+                        self.working_graphql_endpoint = path
+                        return result
                 else:
-                    logging.debug(f"Endpoint {path} returned {response.status_code}: {response.text}")
-                    last_error = f"HTTP {response.status_code}: {response.text}"
+                    response_text = response.text[:200]  # Limit to first 200 chars to avoid huge logs
+                    logging.warning(f"Endpoint {path} returned {response.status_code}: {response_text}...")
+                    last_error = f"HTTP {response.status_code}: {response_text}"
+            except requests.exceptions.Timeout:
+                logging.warning(f"Timeout connecting to GraphQL endpoint {endpoint}")
+                last_error = f"Connection timeout for {endpoint}"
+            except requests.exceptions.ConnectionError as e:
+                logging.warning(f"Connection error with GraphQL endpoint {endpoint}: {str(e)}")
+                last_error = f"Connection error: {str(e)}"
+            except requests.exceptions.RequestException as e:
+                logging.warning(f"Request error with GraphQL endpoint {endpoint}: {str(e)}")
+                last_error = f"Request error: {str(e)}"
             except Exception as e:
-                logging.debug(f"Failed to connect to GraphQL endpoint {endpoint}: {e}")
+                logging.warning(f"Failed to connect to GraphQL endpoint {endpoint}: {str(e)}")
                 last_error = str(e)
         
         # If we get here, no endpoint worked
         logging.error(f"All GraphQL endpoints failed. Last error: {last_error}")
+        
+        # Add some troubleshooting diagnostics
+        logging.error(f"OTP GraphQL connection troubleshooting:")
+        logging.error(f"- Base URL configured: {base_url}")
+        logging.error(f"- Tried endpoints: {self.graphql_endpoints}")
+        logging.error(f"- Check if OTP server is running and accessible")
+        logging.error(f"- Check network connectivity to OTP server")
+        logging.error(f"- Check if OTP server has GraphQL API enabled")
                 
         # Fall back to offline mode if online fails
         logging.info("Falling back to offline mode for route planning")
