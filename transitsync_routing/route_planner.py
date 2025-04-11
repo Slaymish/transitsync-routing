@@ -57,10 +57,17 @@ class RoutePlanner:
         time_str = arrival_dt.strftime("%I:%M%p").lower()   # Example: "08:45am"
         date_str = arrival_dt.strftime("%Y-%m-%d")
 
-        # Create GraphQL query
+        # Create GraphQL query with updated format for OTP v2+
         query = """
-        query PlanExample($from: LocationInput!, $to: LocationInput!, $time: String!, $date: String!, $arriveBy: Boolean!) {
-          plan(from: $from, to: $to, time: $time, date: $date, arriveBy: $arriveBy, mode: "TRANSIT,WALK") {
+        query PlanRoute($fromLat: Float!, $fromLon: Float!, $toLat: Float!, $toLon: Float!, $time: String!, $date: String!, $arriveBy: Boolean!) {
+          plan(
+            fromPlace: {lat: $fromLat, lon: $fromLon},
+            toPlace: {lat: $toLat, lon: $toLon},
+            date: $date,
+            time: $time,
+            arriveBy: $arriveBy,
+            transportModes: [{mode: WALK}, {mode: TRANSIT}]
+          ) {
             itineraries {
               duration
               legs {
@@ -75,8 +82,10 @@ class RoutePlanner:
         }
         """
         variables = {
-            "from": {"lat": lat1, "lon": lon1},
-            "to": {"lat": lat2, "lon": lon2},
+            "fromLat": lat1,
+            "fromLon": lon1,
+            "toLat": lat2,
+            "toLon": lon2,
             "time": time_str,
             "date": date_str,
             "arriveBy": True

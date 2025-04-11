@@ -16,5 +16,6 @@ class Config:
     # Timezone configuration
     TIMEZONE = os.environ.get('TIMEZONE', 'Pacific/Auckland')
 
+    # OTP Configuration - use environment variable or default to localhost:8080/otp
     OTP_URL = os.environ.get('OTP_URL', 'http://localhost:8080')
     OSM_URL = os.environ.get('OSM_URL', 'https://nominatim.openstreetmap.org/search')
