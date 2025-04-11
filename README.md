@@ -2,7 +2,7 @@
 
 **TransitSync Routing** is a standalone Python package for planning public transit routes in Wellington, NZ using GTFS data from Metlink and geocoding from OpenStreetMap.
 
-This repo is **open source** and focuses only on the route-planning logic. Calendar integrations, authentication, and full apps using this module are **kept private**.
+This repo is **open source** and focuses only on the route-planning logic. Used in [TransitSync](https://transit.hamishburke.dev/). Calendar integrations, authentication, and frontend for TransitSync are **kept private**.
 
 ---
 
