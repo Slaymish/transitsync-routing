@@ -16,5 +16,5 @@ class Config:
     # Timezone configuration
     TIMEZONE = os.environ.get('TIMEZONE', 'Pacific/Auckland')
 
-    OTP_URL = os.environ.get('OTP_URL', 'http://localhost:8080/otp/index/graphql')
+    OTP_URL = os.environ.get('OTP_URL', 'http://localhost:8080')
     OSM_URL = os.environ.get('OSM_URL', 'https://nominatim.openstreetmap.org/search')
