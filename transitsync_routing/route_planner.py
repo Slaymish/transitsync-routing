@@ -1,6 +1,5 @@
 import logging
 import datetime
-import math  # Required for haversine calculations in the fallback route planner
 from .event import Event
 from .api_client import APIClient
 from .config import Config
@@ -16,7 +15,8 @@ class RoutePlanner:
     def plan_route_between_events(self, event1: Event, event2: Event):
         """
         Plans a transit route between two events using OTP's GraphQL API,
-        scheduling the route based on event2's start time (or fallback).
+        scheduling the route based on event2's start time.
+        Returns None if routing fails - no fallback to incorrect data.
         """
         if not event1.location:
             logging.warning(f"Event '{event1.summary}' is missing a location")
@@ -57,16 +57,16 @@ class RoutePlanner:
         time_str = arrival_dt.strftime("%I:%M%p").lower()   # Example: "08:45am"
         date_str = arrival_dt.strftime("%Y-%m-%d")
 
-        # Create GraphQL query with updated format for OTP v2+
+        # Updated GraphQL query for OTP v2.7 format - using 'from' and 'to' parameters
         query = """
-        query PlanRoute($fromLat: Float!, $fromLon: Float!, $toLat: Float!, $toLon: Float!, $time: String!, $date: String!, $arriveBy: Boolean!) {
+        query PlanRoute($fromLat: Float!, $fromLon: Float!, $toLat: Float!, $toLon: Float!, $date: String!, $time: String!, $arriveBy: Boolean!) {
           plan(
-            fromPlace: {lat: $fromLat, lon: $fromLon},
-            toPlace: {lat: $toLat, lon: $toLon},
-            date: $date,
-            time: $time,
-            arriveBy: $arriveBy,
-            transportModes: [{mode: WALK}, {mode: TRANSIT}]
+            from: {lat: $fromLat, lon: $fromLon}
+            to: {lat: $toLat, lon: $toLon}
+            date: $date
+            time: $time
+            arriveBy: $arriveBy
+            numItineraries: 1
           ) {
             itineraries {
               duration
@@ -74,13 +74,19 @@ class RoutePlanner:
                 mode
                 startTime
                 endTime
-                from { name }
-                to { name }
+                from {
+                  name
+                }
+                to {
+                  name
+                }
+                distance
               }
             }
           }
         }
         """
+        
         variables = {
             "fromLat": lat1,
             "fromLon": lon1,
@@ -98,34 +104,31 @@ class RoutePlanner:
             
             if result is None:
                 logging.error("GraphQL query returned None result")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+                return None
                 
             if "data" not in result:
                 logging.error(f"GraphQL response missing 'data' field: {result}")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+                return None
                 
-            if "plan" not in result["data"]:
-                logging.error(f"GraphQL response missing 'plan' field: {result}")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+            if "plan" not in result["data"] or result["data"]["plan"] is None:
+                logging.error(f"GraphQL response missing 'plan' field or plan is null: {result}")
+                return None
                 
             if "errors" in result:
                 logging.error(f"GraphQL query returned errors: {result['errors']}")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+                return None
             
             plan_data = result["data"]["plan"]
-            if plan_data is None:
-                logging.error("GraphQL plan data is None")
-                return self._create_fallback_route(event1, event2, arrival_dt)
             
             itineraries = plan_data.get("itineraries", [])
             if not itineraries:
                 logging.error("No itineraries found in GraphQL response")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+                return None
             
             chosen = itineraries[0]
             if not chosen.get("legs"):
                 logging.error("Chosen itinerary contains no legs")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+                return None
             
             # Process the successful response
             first_leg = chosen["legs"][0]
@@ -136,7 +139,7 @@ class RoutePlanner:
                 estimated_arrival_time = datetime.datetime.fromtimestamp(last_leg["endTime"] / 1000).isoformat()
             except (KeyError, TypeError, ValueError) as e:
                 logging.error(f"Error parsing leg times: {e}")
-                return self._create_fallback_route(event1, event2, arrival_dt)
+                return None
             
             route_info = {
                 "from_event": event1.summary,
@@ -155,91 +158,8 @@ class RoutePlanner:
             
         except Exception as e:
             logging.error(f"Error planning route between events: {e}", exc_info=True)
-            return self._create_fallback_route(event1, event2, arrival_dt)
-            
-    def _create_fallback_route(self, event1, event2, arrival_dt):
-        """
-        Creates a fallback route when GraphQL planning fails.
-        Uses a simple straight-line distance estimation.
-        """
-        logging.info("Creating fallback route plan")
-        
-        try:
-            # Get geocoded coordinates
-            geo1 = self.api_client.geocode_address(event1.location)
-            geo2 = self.api_client.geocode_address(event2.location)
-            
-            if not geo1 or not geo2:
-                logging.error("Cannot create fallback route: missing coordinates")
-                return None
-                
-            lat1, lon1 = geo1
-            lat2, lon2 = geo2
-            
-            # Calculate straight-line distance (haversine)
-            R = 6371  # Earth radius in km
-            dLat = math.radians(lat2 - lat1)
-            dLon = math.radians(lon2 - lon1)
-            a = (math.sin(dLat/2) * math.sin(dLat/2) + 
-                 math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
-                 math.sin(dLon/2) * math.sin(dLon/2))
-            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-            distance_km = R * c
-            
-            # Estimate travel time 
-            # - Walking: ~5km/h = ~12 min/km
-            # - Public transit: ~20km/h = ~3 min/km
-            transit_time_minutes = 0
-            
-            if distance_km < 1.5:
-                # Short trip - walking only
-                estimated_time_minutes = distance_km * 12
-                mode = "WALK"
-            else:
-                # Mix of transit and walking
-                estimated_time_minutes = distance_km * 3 + 10  # Transit + 10 min buffer
-                mode = "TRANSIT"
-            
-            # Set departure and arrival times
-            estimated_arrival_time = arrival_dt
-            predicted_departure = arrival_dt - datetime.timedelta(minutes=estimated_time_minutes)
-            
-            # Create a fake itinerary
-            fake_leg = {
-                "mode": mode,
-                "startTime": int(predicted_departure.timestamp() * 1000),
-                "endTime": int(estimated_arrival_time.timestamp() * 1000),
-                "from": {"name": event1.location},
-                "to": {"name": event2.location}
-            }
-            
-            fake_itinerary = {
-                "duration": estimated_time_minutes * 60,  # seconds
-                "legs": [fake_leg]
-            }
-            
-            # Return the route info in the same format as the normal function
-            route_info = {
-                "from_event": event1.summary,
-                "to_event": event2.summary,
-                "from_location": event1.location,
-                "to_location": event2.location,
-                "from_geocoded": {"lat": lat1, "lon": lon1},
-                "to_geocoded": {"lat": lat2, "lon": lon2},
-                "predicted_departure": predicted_departure.isoformat(),
-                "estimated_travel_time_minutes": estimated_time_minutes,
-                "estimated_arrival_time": estimated_arrival_time.isoformat(),
-                "itinerary": fake_itinerary,
-                "is_fallback": True
-            }
-            
-            logging.info(f"Created fallback route with estimated travel time of {estimated_time_minutes:.1f} minutes")
-            return route_info
-            
-        except Exception as e:
-            logging.error(f"Error creating fallback route: {e}", exc_info=True)
             return None
-
+    
     def plan_routes_for_events(self):
         """
         Plans transit routes for each consecutive pair of events.
