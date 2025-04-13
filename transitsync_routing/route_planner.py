@@ -12,6 +12,52 @@ class RoutePlanner:
         self.events = events
         self.api_client = APIClient()
 
+    def is_suitable_event(self, event):
+        """
+        Determines if an event is suitable for transit planning.
+        
+        Filters out:
+        - Events without locations
+        - Events already created by the bot (Transit/Walking prefixes)
+        - Events with suspicious indicators (like duplicate events)
+        - Events with generic location names like "Online" or "Virtual"
+
+        Args:
+            event: The event object to check
+
+        Returns:
+            bool: True if the event should be processed for transit planning
+        """
+        # Skip events without locations
+        if not event.location or not event.location.strip():
+            logging.debug(f"Skipping event '{event.summary}' - no location")
+            return False
+            
+        # Skip events created by the transit bot
+        if any(prefix in event.summary for prefix in ["Transit:", "Walking:", "[TransitBot]"]):
+            logging.debug(f"Skipping bot-created event: {event.summary}")
+            return False
+            
+        # Skip events with common virtual meeting locations
+        virtual_indicators = ["online", "virtual", "zoom", "meet.google", "teams", "webex", "skype", "phone"]
+        if any(indicator in event.location.lower() for indicator in virtual_indicators):
+            logging.debug(f"Skipping virtual event: {event.summary} at {event.location}")
+            return False
+            
+        # Skip events without a start time
+        if not event.start_time:
+            logging.debug(f"Skipping event '{event.summary}' - no start time")
+            return False
+            
+        # Don't process events more than 30 days in the future
+        now = datetime.datetime.now()
+        if event.start_time and (event.start_time - now).days > 30:
+            logging.debug(f"Skipping event '{event.summary}' - too far in the future ({(event.start_time - now).days} days)")
+            return False
+            
+        # Successfully passed all filters
+        return True
+
     def plan_route_between_events(self, event1: Event, event2: Event):
         """
         Plans a transit route between two events using OTP's GraphQL API,
@@ -201,21 +247,26 @@ class RoutePlanner:
                 event.location = home_address
                 logging.info(f"Using home address for event without location: {event.summary}")
 
-        # Filter out events created by the bot
-        filtered_events = [event for event in self.events if not (
-            event.summary.startswith("Transit:") or event.summary.startswith("Walking:") or event.summary.startswith("[TransitBot]")
-        ) and event.location and event.location.strip()]
+        # Use our new is_suitable_event method to filter events properly
+        filtered_events = [event for event in self.events if self.is_suitable_event(event)]
 
         if len(filtered_events) < 1:
-            logging.info("No valid events found after filtering.")
+            logging.info("No suitable events found after filtering.")
             return []
 
         sorted_events = sorted(filtered_events, key=lambda e: e.start_time or datetime.datetime.min)
+        
+        # Remove duplicate locations in sequence
         unique_events = [sorted_events[0]]
         for event in sorted_events[1:]:
             if event.location.strip().lower() != unique_events[-1].location.strip().lower():
                 unique_events.append(event)
                 
+        # Log the filtered events for debugging
+        logging.info(f"Processing {len(unique_events)} unique suitable events after filtering from {len(self.events)} total events")
+        for idx, event in enumerate(unique_events):
+            logging.info(f"Event {idx+1}: {event.summary} at {event.location} ({event.start_time})")
+            
         routes = []
         
         # If first event isn't the home address, create a dummy home event.
