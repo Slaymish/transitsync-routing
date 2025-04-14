@@ -254,11 +254,11 @@ class RoutePlanner:
             home_address = "1 Willis Street, Wellington, New Zealand"
             logging.info(f"No home address provided, using default: {home_address}")
         
-        # Set a fallback home address if an event lacks one.
+        # Log events without locations but DON'T set a fallback - skip them instead
         for event in self.events:
             if not event.location or not event.location.strip():
-                event.location = home_address
-                logging.info(f"Using home address for event without location: {event.summary}")
+                logging.info(f"Skipping event without location: {event.summary}")
+                # Don't set a default location
 
         # Use our new is_suitable_event method to filter events properly
         filtered_events = [event for event in self.events if self.is_suitable_event(event)]
@@ -345,7 +345,7 @@ class RoutePlanner:
                             "🚌 PUBLIC TRANSIT INFORMATION 🚌\n\n"
                             f"From: {route.get('from_event')} ({route.get('from_location')})\n"
                             f"To: {route.get('to_event')} ({route.get('to_location')})\n\n"
-                            f"⏱️ Travel time: {route.get('estimated_travel_time_minutes'):.1f} minutes\n"
+                            f"⏱️ Travel time: {route.get('estimated_travel_time_minutes']:.1f} minutes\n"
                             f"⏰ Depart at: {formatted_dep}\n"
                             f"🏁 Arrive by: {formatted_arr}\n"
                         )
