@@ -50,10 +50,23 @@ class RoutePlanner:
             return False
             
         # Don't process events more than 30 days in the future
-        now = datetime.datetime.now()
-        if event.start_time and (event.start_time - now).days > 30:
-            logging.debug(f"Skipping event '{event.summary}' - too far in the future ({(event.start_time - now).days} days)")
-            return False
+        # Fix timezone issue by ensuring both datetimes are timezone-aware
+        if event.start_time:
+            # Get current time with timezone info
+            now = datetime.datetime.now(datetime.timezone.utc)
+            
+            # If event start_time has timezone info, compare directly
+            if event.start_time.tzinfo:
+                days_difference = (event.start_time - now).days
+            else:
+                # If event time is naive, assume it's in UTC for comparison
+                aware_start = event.start_time.replace(tzinfo=datetime.timezone.utc)
+                days_difference = (aware_start - now).days
+                
+            # Skip if more than 30 days in the future
+            if days_difference > 30:
+                logging.debug(f"Skipping event '{event.summary}' - too far in the future ({days_difference} days)")
+                return False
             
         # Successfully passed all filters
         return True
