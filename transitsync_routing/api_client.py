@@ -55,29 +55,7 @@ class APIClient:
             return ""
         
         normalized = address.strip()
-        
-        # Special mappings for abbreviated Wellington locations
-        wellington_locations = {
-            "CO246": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO238": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO219": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO118": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MYLT101": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MYLT102": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MYLT103": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "MY": "Murphy Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "KK": "Kirk Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "HM": "Hugh Mackenzie Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "EA": "Easterfield Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "von zedlitz": "von Zedlitz Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "VZ": "von Zedlitz Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "CO": "Cotton Building, Kelburn Campus, Victoria University, Wellington, New Zealand",
-            "zoo": "Wellington Zoo, 200 Daniell Street, Newtown, Wellington 6021, New Zealand",
-            "Wellington Zoo": "Wellington Zoo, 200 Daniell Street, Newtown, Wellington 6021, New Zealand",
-            "VUW": "Victoria University of Wellington, Kelburn Parade, Wellington, New Zealand",
-            "Kelburn Campus": "Victoria University of Wellington, Kelburn Parade, Wellington, New Zealand"
-        }
-        
+               
         # Handle VUW building codes like "CO246"
         vuw_code_pattern = re.compile(r'^([A-Za-z]{2,4})(\d{1,3})$')
         match = vuw_code_pattern.match(normalized)
@@ -95,17 +73,9 @@ class APIClient:
                 "AM": "Alan MacDiarmid Building"
             }
             if building_code in buildings:
-                normalized = f"{buildings[building_code]}, Kelburn Campus, Victoria University, Wellington, New Zealand"
+                normalized = f"Kelburn Parade, Kelburn, Wellington 6012, New Zealand"
                 logging.info(f"Recognized VUW room code '{address}' -> '{normalized}'")
-        elif normalized in wellington_locations:
-            normalized = wellington_locations[normalized]
-            logging.info(f"Normalized '{address}' to '{normalized}'")
-        else:
-            for key, full_address in wellington_locations.items():
-                if key.lower() in normalized.lower():
-                    normalized = full_address
-                    logging.info(f"Normalized '{address}' to '{normalized}'")
-                    break
+                return normalized
 
         # Append Wellington/New Zealand context if missing details.
         if "wellington" not in normalized.lower() and "new zealand" not in normalized.lower():
