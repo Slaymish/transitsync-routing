@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any
 
 class Event:
@@ -85,7 +85,7 @@ class Event:
         elif self.start_time:
             # Default to start_time + 1 hour if no end time is specified
             event_dict["end"] = {
-                "dateTime": (self.start_time + datetime.timedelta(hours=1)).isoformat(),
+                "dateTime": (self.start_time + timedelta(hours=1)).isoformat(),
                 "timeZone": self.time_zone,
             }
         
