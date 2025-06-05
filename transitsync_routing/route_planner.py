@@ -345,7 +345,7 @@ class RoutePlanner:
                             "🚌 PUBLIC TRANSIT INFORMATION 🚌\n\n"
                             f"From: {route.get('from_event')} ({route.get('from_location')})\n"
                             f"To: {route.get('to_event')} ({route.get('to_location')})\n\n"
-                            f"⏱️ Travel time: {route.get('estimated_travel_time_minutes']:.1f} minutes\n"
+                            f"⏱️ Travel time: {route.get('estimated_travel_time_minutes', 0):.1f} minutes\n"
                             f"⏰ Depart at: {formatted_dep}\n"
                             f"🏁 Arrive by: {formatted_arr}\n"
                         )
